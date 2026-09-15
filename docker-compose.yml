@@ -1,0 +1,75 @@
+# Floci: emulador AWS local (substituto do LocalStack Community, descontinuado
+# em março/2026). Diferente do MinIO: um único endpoint (porta 4566) fala a
+# API real de vários serviços AWS (S3, SQS, DynamoDB etc.), não só S3.
+# Docs: https://floci.io
+
+services:
+  floci:
+    image: floci/floci:latest
+    platform: linux/amd64
+    container_name: floci
+    ports:
+      - "4566:4566" # endpoint único pra todos os serviços emulados
+    environment:
+      # Credenciais AWS default do Floci já são "test"/"test" — não há
+      # variável de usuário/senha própria (isso era coisa de MinIO).
+      - FLOCI_STORAGE_MODE=hybrid # persistência entre restarts sem custo alto de durabilidade síncrona
+    volumes:
+      - floci-data:/app/data
+      # Necessário pra serviços que usam containers Docker reais por baixo
+      # (Lambda, RDS etc.) — não é seu caso agora (só S3), mas é o padrão do projeto.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Cria o bucket automaticamente ao subir o compose, via AWS CLI real
+  # (Floci fala a API S3 de verdade, então nada de cliente MinIO aqui).
+  floci-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      - floci
+    env_file: .env
+    environment:
+      AWS_ACCESS_KEY_ID: ${FLOCI_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${FLOCI_SECRET_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: >
+      /bin/sh -c "
+      until aws --endpoint-url=${FLOCI_ENDPOINT_DOCKER} s3api list-buckets >/dev/null 2>&1; do sleep 1; done;
+      aws --endpoint-url=${FLOCI_ENDPOINT_DOCKER} s3 mb s3://${FLOCI_BUCKET} || true;
+      "
+
+  # Cria/atualiza o arquivo DuckDB com views sobre a camada gold (Delta) no
+  # S3/Floci, usado pelo Metabase como fonte de dados. Reroda toda vez que
+  # você subir o compose — não precisa de Spark rodando pra servir os dados.
+  duckdb-init:
+    image: python:3.12-slim
+    container_name: agri-data-platform-duckdb-init
+    depends_on:
+      - floci-init # garante que o bucket já existe antes do delta_scan tentar ler
+    env_file: .env
+    volumes:
+      - warehouse-data:/data/warehouse
+      - ./scripts/init_warehouse.py:/scripts/init_warehouse.py:ro
+    command: >
+      /bin/sh -c "
+      pip install --no-cache-dir duckdb --quiet &&
+      python /scripts/init_warehouse.py
+      "
+
+  # Metabase + driver DuckDB via build próprio (ver docker/metabase/Dockerfile
+  # e o comentário lá sobre por que não usamos mais uma imagem pronta de terceiro).
+  metabase:
+    build:
+      context: ./docker/metabase
+    container_name: agri-data-platform-metabase
+    depends_on:
+      - duckdb-init
+    ports:
+      - "3000:3000"
+    volumes:
+      - warehouse-data:/data/warehouse
+    # Na primeira vez, configure manualmente em Admin > Databases > Add
+    # database > DuckDB, apontando pro arquivo /data/warehouse/warehouse.duckdb
+
+volumes:
+  floci-data:
+  warehouse-data:

@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.douglas</groupId>
+    <artifactId>market-data-platform</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <properties>
+
+        <!-- ========================================================= -->
+        <!-- Java / Scala                                              -->
+        <!-- ========================================================= -->
+
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <scala.version>2.13.16</scala.version>
+        <scala.binary.version>2.13</scala.binary.version>
+
+        <!-- ========================================================= -->
+        <!-- Spark / Delta / Hadoop                                    -->
+        <!-- ========================================================= -->
+
+        <spark.version>4.0.1</spark.version>
+        <delta.version>4.0.0</delta.version>
+        <hadoop.version>3.4.1</hadoop.version>
+
+        <!-- ========================================================= -->
+        <!-- AWS                                                       -->
+        <!-- ========================================================= -->
+
+        <aws.sdk.version>2.27.21</aws.sdk.version>
+
+        <!-- ========================================================= -->
+        <!-- Security / dependency overrides                           -->
+        <!-- ========================================================= -->
+
+        <avro.version>1.12.1</avro.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
+        <zookeeper.version>3.9.5</zookeeper.version>
+        <lz4.version>1.11.1</lz4.version>
+        <netty.version>4.1.127.Final</netty.version>
+
+        <!-- ========================================================= -->
+        <!-- Tests                                                      -->
+        <!-- ========================================================= -->
+
+        <junit.version>5.10.2</junit.version>
+        <scalatest.version>3.2.18</scalatest.version>
+
+        <!-- ========================================================= -->
+        <!-- Maven plugins                                              -->
+        <!-- ========================================================= -->
+
+        <scala.maven.plugin.version>4.9.2</scala.maven.plugin.version>
+        <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
+        <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
+        <scalatest.maven.plugin.version>2.2.0</scalatest.maven.plugin.version>
+
+    </properties>
+
+
+    <!-- ============================================================= -->
+    <!-- Dependencies                                                   -->
+    <!-- ============================================================= -->
+
+    <dependencies>
+
+        <!-- ========================================================= -->
+        <!-- Scala                                                      -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>${scala.version}</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- Spark                                                     -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-core_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+
+            <exclusions>
+                <!-- Spark 4.0.1 traz org.lz4:lz4-java:1.8.0 -->
+                <exclusion>
+                    <groupId>org.lz4</groupId>
+                    <artifactId>lz4-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_${scala.binary.version}</artifactId>
+            <version>${spark.version}</version>
+
+            <exclusions>
+                <exclusion>
+                    <groupId>org.lz4</groupId>
+                    <artifactId>lz4-java</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- LZ4 — patched fork                                        -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>at.yawk.lz4</groupId>
+            <artifactId>lz4-java</artifactId>
+            <version>${lz4.version}</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- ZooKeeper — security override                             -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>org.apache.zookeeper</groupId>
+            <artifactId>zookeeper</artifactId>
+            <version>${zookeeper.version}</version>
+        </dependency>
+
+        <!-- ========================================================= -->
+        <!-- Jackson Core                                                -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.22.0</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- Delta Lake                                                 -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-spark_${scala.binary.version}</artifactId>
+            <version>${delta.version}</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- Hadoop S3A                                                 -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aws</artifactId>
+            <version>${hadoop.version}</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- AWS SDK v2                                                 -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- Security overrides                                        -->
+        <!-- ========================================================= -->
+
+        <!-- CVE-2025-33042 -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>${avro.version}</version>
+        </dependency>
+
+
+        <!-- CVE-2025-48924 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>${commons-lang3.version}</version>
+        </dependency>
+
+
+        <!-- Netty — CVE-2025-58057 -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-codec</artifactId>
+            <version>${netty.version}</version>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- JUnit 5                                                     -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+
+        <!-- ========================================================= -->
+        <!-- ScalaTest                                                   -->
+        <!-- ========================================================= -->
+
+        <dependency>
+            <groupId>org.scalatest</groupId>
+            <artifactId>scalatest_${scala.binary.version}</artifactId>
+            <version>${scalatest.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+
+    <!-- ============================================================= -->
+    <!-- Build                                                          -->
+    <!-- ============================================================= -->
+
+    <build>
+
+        <!-- sourceDirectory NÃO é sobrescrito aqui de propósito: o padrão
+             (src/main/java) precisa continuar valendo, senão o IntelliJ/Maven
+             param de reconhecer os .java como parte do source root. O
+             scala-maven-plugin adiciona src/main/scala por conta própria
+             via "add-source", sem precisar (e sem poder) sobrescrever isso. -->
+        <testSourceDirectory>src/test/scala</testSourceDirectory>
+
+        <plugins>
+
+            <!-- ===================================================== -->
+            <!-- Scala Maven Plugin                                    -->
+            <!-- ===================================================== -->
+
+            <plugin>
+                <groupId>net.alchim31.maven</groupId>
+                <artifactId>scala-maven-plugin</artifactId>
+                <version>${scala.maven.plugin.version}</version>
+
+                <executions>
+
+                    <execution>
+                        <id>scala-compile</id>
+                        <goals>
+                            <goal>add-source</goal>
+                            <goal>compile</goal>
+                        </goals>
+                    </execution>
+
+                    <execution>
+                        <id>scala-test-compile</id>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                    </execution>
+
+                </executions>
+
+                <configuration>
+                    <scalaVersion>${scala.version}</scalaVersion>
+                </configuration>
+
+            </plugin>
+
+
+            <!-- ===================================================== -->
+            <!-- Java Compiler                                         -->
+            <!-- ===================================================== -->
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.plugin.version}</version>
+
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                </configuration>
+
+            </plugin>
+
+
+            <!-- ===================================================== -->
+            <!-- JUnit                                                   -->
+            <!-- ===================================================== -->
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven.surefire.plugin.version}</version>
+            </plugin>
+
+
+            <!-- ===================================================== -->
+            <!-- ScalaTest                                               -->
+            <!-- ===================================================== -->
+
+            <plugin>
+                <groupId>org.scalatest</groupId>
+                <artifactId>scalatest-maven-plugin</artifactId>
+                <version>${scalatest.maven.plugin.version}</version>
+
+                <executions>
+                    <execution>
+                        <id>test</id>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                    </execution>
+                </executions>
+
+            </plugin>
+
+        </plugins>
+
+    </build>
+
+</project>
