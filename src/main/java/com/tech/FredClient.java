@@ -125,14 +125,4 @@ public class FredClient {
             }
         }
     }
-
-    public static void main(String[] args) throws InterruptedException {
-        FredClient client = FredClient.withApiKeyFromEnvironment();
-
-        // Reuses the same indicators already validated in
-        // macroeconomics-ai as a starting point.
-        List<String> series = List.of("CPIAUCSL", "FEDFUNDS", "DGS10");
-
-        client.fetchAndStageSeriesBatch(series);
-    }
 }

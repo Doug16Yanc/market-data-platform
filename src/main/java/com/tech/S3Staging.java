@@ -41,8 +41,6 @@ final class S3Staging {
             .credentialsProvider(StaticCredentialsProvider.create(
                     AwsBasicCredentials.create(ACCESS_KEY, SECRET_KEY)))
             .serviceConfiguration(S3Configuration.builder()
-                    // obrigatório pro Floci (e MinIO-style em geral): sem isso o SDK monta
-                    // URL com subdomínio por bucket, que não resolve em storage local
                     .pathStyleAccessEnabled(true)
                     .build())
             .build();
@@ -51,22 +49,23 @@ final class S3Staging {
     }
 
     static void putJson(String bucket, String key, String json) {
+        put(bucket, key, "application/json", json);
+    }
+
+    static void putCsv(String bucket, String key, String csv) {
+        put(bucket, key, "text/csv", csv);
+    }
+
+    private static void put(String bucket, String key, String contentType, String body) {
         CLIENT.putObject(
                 PutObjectRequest.builder()
                         .bucket(bucket)
                         .key(key)
-                        .contentType("application/json")
+                        .contentType(contentType)
                         .build(),
-                RequestBody.fromString(json));
+                RequestBody.fromString(body));
     }
 
-    /**
-     * Falha rápido e com mensagem clara se a variável de ambiente não
-     * estiver setada, em vez de deixar o AWS SDK falhar mais tarde com um
-     * erro genérico de credenciais (foi exatamente isso que gerou o
-     * NoAuthWithAWSException no Spark — aqui a gente evita esse mesmo
-     * problema silencioso do lado do client Java).
-     */
     private static String requireEnv(String name) {
         String value = System.getenv(name);
         if (value == null || value.isBlank()) {

@@ -1,14 +1,24 @@
 package com.tech.transform
 
+import com.tech.config.AppConfig
+import com.tech.quality.DataQualityChecks
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.{DataFrame, SparkSession}
 import org.apache.spark.sql.functions._
+import io.delta.tables.DeltaTable
 
 /**
- * Spark job: reads Alpha Vantage + FRED raw data from Bronze,
+ * Spark job: reads Twelve Data + FRED raw data from Bronze,
  * flattens/types it, does an as-of join (forward-filling the macro
  * series over the trading calendar) and writes the Silver as Delta.
+ *
+ * Alpha Vantage and Stooq were dropped as sources: Alpha Vantage's
+ * free tier no longer allows full daily history (outputsize=full
+ * became premium), and Stooq started requiring a captcha-issued
+ * apikey — neither is viable for unattended extraction anymore.
+ * Twelve Data replaces both (5000 data points/request on the free
+ * tier, official API).
  *
  * Join decision: the macro series (CPIAUCSL, FEDFUNDS are monthly;
  * DGS10 is daily) are propagated forward by last known value up to
@@ -21,29 +31,30 @@ import org.apache.spark.sql.functions._
  */
 object SparkMarketTransformJob {
 
-  private val AlphaVantageBronzePath = "s3a://market-data-lake/bronze/alpha_vantage/"
+  private val TwelveDataBronzePath = "s3a://market-data-lake/bronze/twelvedata/"
   private val FredBronzePath = "s3a://market-data-lake/bronze/fred/"
   private val OutputPath = "s3a://market-data-lake/silver/price_with_macro"
 
   private val SERIES_FRED = Seq("CPIAUCSL", "FEDFUNDS", "DGS10")
 
-  private val AlphaVantageSchema = StructType(Seq(
-    StructField("Meta Data", StructType(Seq(
-      StructField("2. Symbol", StringType)
+  private val TwelveDataSchema = StructType(Seq(
+    StructField("meta", StructType(Seq(
+      StructField("symbol", StringType)
     ))),
-    StructField("Time Series (Daily)", MapType(StringType, StructType(Seq(
-      StructField("1. open", StringType),
-      StructField("2. high", StringType),
-      StructField("3. low", StringType),
-      StructField("4. close", StringType),
-      StructField("5. volume", StringType)
+    StructField("values", ArrayType(StructType(Seq(
+      StructField("datetime", StringType),
+      StructField("open", StringType),
+      StructField("high", StringType),
+      StructField("low", StringType),
+      StructField("close", StringType),
+      StructField("volume", StringType)
     ))))
   ))
 
   def main(args: Array[String]): Unit = {
     val spark = buildSparkSession()
 
-    val prices = readAlphaVantagePrices(spark)
+    val prices = readTwelveDataPrices(spark)
     val filledMacro = readAndBuildMacroCalendar(spark, prices)
 
     val priceWithMacro = prices
@@ -56,36 +67,56 @@ object SparkMarketTransformJob {
 
     runChecks(prices, priceWithMacro)
 
-    priceWithMacro.write
-      .format("delta")
-      .mode("overwrite") // TODO: same note as the other jobs — switch to MERGE when it makes sense
-      .partitionBy("symbol")
-      .save(OutputPath)
+    if (DeltaTable.isDeltaTable(spark, OutputPath)) {
+      val deltaTable = DeltaTable.forPath(spark, OutputPath)
+
+      deltaTable.as("target")
+        .merge(
+          priceWithMacro.as("source"),
+          "target.symbol = source.symbol AND target.date = source.date"
+        )
+        .whenMatched()
+        .updateAll()
+        .whenNotMatched()
+        .insertAll()
+        .execute()
+
+      println(s"MERGE completed on Silver → $OutputPath")
+    } else {
+      priceWithMacro.write
+        .format("delta")
+        .mode("overwrite")
+        .partitionBy("symbol")
+        .save(OutputPath)
+
+      println(s"First write of Silver → $OutputPath")
+    }
 
     println(s"Write completed at: $OutputPath")
 
     spark.stop()
   }
 
-  /** Reads Alpha Vantage's Bronze payload (dates as map keys, as
-   * returned natively) and flattens it into one row per trading day.
+  /** Reads Twelve Data's Bronze payload (one JSON file per symbol,
+   * a "values" array with one entry per trading day) and flattens
+   * it into one row per (symbol, date).
    */
-  private def readAlphaVantagePrices(spark: SparkSession): DataFrame = {
+  private def readTwelveDataPrices(spark: SparkSession): DataFrame = {
     spark.read
-      .schema(AlphaVantageSchema)
-      .json(AlphaVantageBronzePath)
+      .schema(TwelveDataSchema)
+      .json(TwelveDataBronzePath)
       .select(
-        col("`Meta Data`.`2. Symbol`").as("symbol"),
-        explode(col("`Time Series (Daily)`")).as(Seq("dateStr", "values"))
+        col("meta.symbol").as("symbol"),
+        explode(col("values")).as("v")
       )
       .select(
         col("symbol"),
-        to_date(col("dateStr")).as("date"),
-        col("values.`1. open`").cast(DoubleType).as("open"),
-        col("values.`2. high`").cast(DoubleType).as("high"),
-        col("values.`3. low`").cast(DoubleType).as("low"),
-        col("values.`4. close`").cast(DoubleType).as("close"),
-        col("values.`5. volume`").cast(LongType).as("volume")
+        to_date(col("v.datetime")).as("date"),
+        col("v.open").cast(DoubleType).as("open"),
+        col("v.high").cast(DoubleType).as("high"),
+        col("v.low").cast(DoubleType).as("low"),
+        col("v.close").cast(DoubleType).as("close"),
+        col("v.volume").cast(LongType).as("volume")
       )
   }
 
@@ -104,9 +135,6 @@ object SparkMarketTransformJob {
       .option("multiLine", value = true)
       .json(FredBronzePath)
       .select(
-        // derives the seriesId from the file name
-        // (bronze/fred/{seriesId}.json), since the API payload
-        // doesn't repeat the id on every observation
         regexp_extract(input_file_name(), "([^/]+)\\.json$", 1).as("seriesId"),
         explode(col("observations")).as("obs")
       )
@@ -115,7 +143,6 @@ object SparkMarketTransformJob {
         to_date(col("obs.date")).as("date"),
         col("obs.value").as("valueStr")
       )
-      // FRED uses "." for a missing observation instead of omitting the row
       .filter(col("valueStr") =!= ".")
       .withColumn("value", col("valueStr").cast(DoubleType))
 
@@ -130,10 +157,6 @@ object SparkMarketTransformJob {
         col("DGS10").as("treasury10y")
       )
 
-    // Continuous calendar (every day, not just trading days or days
-    // with a macro observation) spanning from the start of the macro
-    // series to the last price date — needed for forward-fill to work
-    // even when a trading date doesn't line up with an observation.
     val minDate = fredWide.agg(min("date")).as[java.sql.Date].head()
     val maxDate = prices.agg(max("date")).as[java.sql.Date].head()
 
@@ -161,27 +184,21 @@ object SparkMarketTransformJob {
     )
     DataQualityChecks.printReport(results)
 
-    // Just logs for now — decide later whether any of these checks
-    // should abort the job (e.g. positivePrices failing is a strong
-    // signal of broken parsing, might be worth a throw there).
     if (results.exists(!_.passed)) {
       println("WARNING: one or more quality checks failed — see report above.")
     }
   }
 
   private def buildSparkSession(): SparkSession = {
-    val accessKey = sys.env.getOrElse("FLOCI_ACCESS_KEY", "test")
-    val secretKey = sys.env.getOrElse("FLOCI_SECRET_KEY", "test")
-    val endpoint = sys.env.getOrElse("FLOCI_ENDPOINT", "http://localhost:4566")
 
     SparkSession.builder()
       .appName("market-data-lake-transform")
       .master("local[*]")
       .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
       .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
-      .config("spark.hadoop.fs.s3a.access.key", accessKey)
-      .config("spark.hadoop.fs.s3a.secret.key", secretKey)
-      .config("spark.hadoop.fs.s3a.endpoint", endpoint)
+      .config("spark.hadoop.fs.s3a.access.key", AppConfig.accessKey)
+      .config("spark.hadoop.fs.s3a.secret.key", AppConfig.secretKey)
+      .config("spark.hadoop.fs.s3a.endpoint",   AppConfig.endpoint)
       .config("spark.hadoop.fs.s3a.path.style.access", "true")
       .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
       .config("spark.hadoop.fs.s3a.aws.credentials.provider",

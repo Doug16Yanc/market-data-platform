@@ -7,7 +7,7 @@ services:
   floci:
     image: floci/floci:latest
     platform: linux/amd64
-    container_name: floci
+    container_name: market-data-platform-floci
     ports:
       - "4566:4566" # endpoint único pra todos os serviços emulados
     environment:
@@ -24,6 +24,7 @@ services:
   # (Floci fala a API S3 de verdade, então nada de cliente MinIO aqui).
   floci-init:
     image: amazon/aws-cli:latest
+    container_name: market-data-platform-floci-init
     depends_on:
       - floci
     env_file: .env
@@ -37,15 +38,18 @@ services:
       aws --endpoint-url=${FLOCI_ENDPOINT_DOCKER} s3 mb s3://${FLOCI_BUCKET} || true;
       "
 
-  # Cria/atualiza o arquivo DuckDB com views sobre a camada gold (Delta) no
-  # S3/Floci, usado pelo Metabase como fonte de dados. Reroda toda vez que
-  # você subir o compose — não precisa de Spark rodando pra servir os dados.
+  # Cria/atualiza o arquivo DuckDB com views sobre as camadas Silver e Gold (Delta)
+  # no S3/Floci, usado pelo Metabase como fonte de dados.
+  # Reroda toda vez que você subir o compose — não precisa de Spark rodando
+  # pra servir os dados.
   duckdb-init:
     image: python:3.12-slim
-    container_name: agri-data-platform-duckdb-init
+    container_name: market-data-platform-duckdb-init
     depends_on:
-      - floci-init # garante que o bucket já existe antes do delta_scan tentar ler
+      - floci-init
     env_file: .env
+    environment:
+      - HOME=/data/warehouse
     volumes:
       - warehouse-data:/data/warehouse
       - ./scripts/init_warehouse.py:/scripts/init_warehouse.py:ro
@@ -55,16 +59,16 @@ services:
       python /scripts/init_warehouse.py
       "
 
-  # Metabase + driver DuckDB via build próprio (ver docker/metabase/Dockerfile
-  # e o comentário lá sobre por que não usamos mais uma imagem pronta de terceiro).
   metabase:
     build:
       context: ./docker/metabase
-    container_name: agri-data-platform-metabase
+    container_name: market-data-platform-metabase
     depends_on:
       - duckdb-init
     ports:
       - "3000:3000"
+    environment:
+      - HOME=/data/warehouse
     volumes:
       - warehouse-data:/data/warehouse
     # Na primeira vez, configure manualmente em Admin > Databases > Add
