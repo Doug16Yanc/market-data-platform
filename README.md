@@ -171,28 +171,45 @@ supports genuine CAPM-style analysis directly in SQL — no notebook required:
 ```sql
 WITH spy AS (
     SELECT date, return_1d AS spy_return
-    FROM gold_daily_features
-    WHERE symbol = 'SPY'
-),
-ativos AS (
-    SELECT symbol, date, return_1d
-    FROM gold_daily_features
-    WHERE symbol != 'SPY'
-)
+FROM gold_daily_features
+WHERE symbol = 'SPY'
+    ),
+    assets AS (
+SELECT symbol, date, return_1d
+FROM gold_daily_features
+WHERE symbol != 'SPY'
+    )
 SELECT
     a.symbol,
     COVAR_SAMP(a.return_1d, s.spy_return) / VAR_SAMP(s.spy_return) AS beta,
     CORR(a.return_1d, s.spy_return) AS correlation_to_spy,
     AVG(a.return_1d) - AVG(s.spy_return) AS naive_alpha
-FROM ativos a
-JOIN spy s ON a.date = s.date
+FROM assets a
+         JOIN spy s ON a.date = s.date
 GROUP BY a.symbol
 ORDER BY beta DESC;
 ```
 
 More examples — an asset-to-asset correlation matrix, interest-rate regime
-comparisons, and volatility/RSI-based signal screens — live in
-[`docs/example-queries.sql`](#).
+comparisons, sector-relative alpha, and volatility/RSI-based signal screens —
+live in [`docs/example-queries.sql`](./docs/example-queries.sql).
+
+## Visualizations
+
+Static images generated from the warehouse via
+[`generate_correlation_heatmap.py`](./generate_correlation_heatmap.py),
+kept out of Metabase's live dashboards so the README stays lightweight and
+doesn't depend on a running instance to make sense.
+
+### Asset return correlation matrix
+
+![Correlation matrix of daily returns across all tracked symbols](./docs/images/correlation_matrix.png)
+
+A correlation matrix is a grid by nature — every symbol compared against
+every other — so it's rendered as a heatmap rather than a pie/sunburst
+chart. A part-to-whole chart would need the values to sum to something
+meaningful; correlation coefficients don't (see query #1 in
+`example-queries.sql` for how this is computed).
 
 ## Known limitations
 
