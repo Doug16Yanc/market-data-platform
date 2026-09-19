@@ -82,6 +82,10 @@ no AWS account or cloud spend required to develop or demo it.
   (federal funds rate), `DGS10` (10-year treasury yield). Free, no
   meaningful rate limit for this scale of use.
 
+## Diagram
+
+![diagram](https://github.com/user-attachments/assets/6081c23d-0d0d-43ae-8dc7-fed0838feb28)
+
 ### A note on the price data source (a small case study in vendor risk)
 
 This project didn't start on Twelve Data. It went through two prior sources,
